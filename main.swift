@@ -5,6 +5,7 @@ import AppKit
 import Carbon.HIToolbox
 import CoreGraphics
 import IOKit
+import ServiceManagement
 
 let appName = "XDR Agent Screen"
 
@@ -201,6 +202,27 @@ func scheduleMirrorSync() {
     let w = DispatchWorkItem { syncMirror() }
     mirrorWork = w
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: w)
+}
+
+// MARK: - Launch at login
+
+// install.sh runs the app from a LaunchAgent (which also restarts it after a crash); a login item
+// on top of that would only start a second copy.
+let managedByLaunchAgent = ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] == "local.xdr-agent-screen"
+
+func loginItemStatus() -> String {
+    switch SMAppService.mainApp.status {
+    case .enabled: return "enabled"
+    case .requiresApproval: return "requiresApproval"
+    case .notRegistered: return "notRegistered"
+    case .notFound: return "notFound"
+    @unknown default: return "unknown"
+    }
+}
+
+func setLoginItem(_ on: Bool) throws {
+    if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+    log("login item \(on ? "on" : "off") → \(loginItemStatus())")
 }
 
 // MARK: - Hotkey formatting
@@ -629,8 +651,18 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   action: nil, keyEquivalent: "")
         virtItem.submenu = virtMenu
         menu.addItem(virtItem)
-
         menu.addItem(.separator())
+
+        // State in the title rather than a checkmark: a checked item makes the menu reserve a state
+        // column, which shifts every title off the sliders' edge.
+        if managedByLaunchAgent {
+            let item = NSMenuItem(title: "Launch at Login: On (LaunchAgent)", action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        } else {
+            let on = SMAppService.mainApp.status == .enabled
+            menu.addItem(menuItem("Launch at Login: " + (on ? "On" : "Off"), #selector(toggleLoginItem)))
+        }
         menu.addItem(NSMenuItem(title: "Quit \(appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
@@ -647,6 +679,18 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         scheduleMirrorSync()
     }
 
+    @objc func toggleLoginItem() {
+        do {
+            try setLoginItem(SMAppService.mainApp.status != .enabled)
+            if SMAppService.mainApp.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Couldn't change Launch at Login"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+        }
+    }
+
     @objc func toggleMirror() {
         mirrorEnabled.toggle()
         scheduleMirrorSync()
@@ -655,7 +699,28 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 // MARK: - Main
 
+// `XDRAgentScreen --login-item status|on|off` manages Launch at Login without the UI.
+if let i = CommandLine.arguments.firstIndex(of: "--login-item") {
+    let arg = CommandLine.arguments.dropFirst(i + 1).first ?? "status"
+    do {
+        if arg == "on" || arg == "off" { try setLoginItem(arg == "on") }
+        print(loginItemStatus())
+        exit(0)
+    } catch {
+        print("error: \(error.localizedDescription)")
+        exit(1)
+    }
+}
+
 let nsApp = NSApplication.shared
+
+// Only one copy: a login item and a LaunchAgent (or a double-click) must not both run it.
+if NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
+    .contains(where: { $0.processIdentifier != getpid() }) {
+    log("another instance is running; exiting")
+    exit(0)
+}
+
 let app = App()
 nsApp.delegate = app
 nsApp.setActivationPolicy(.accessory)

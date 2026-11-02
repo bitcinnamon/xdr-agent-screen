@@ -24,6 +24,7 @@ Built for a Mac mini driving a Pro Display XDR, but works with any display.
 - **Agent Display**: an optional virtual display (1280×720 up to 3840×2160), mirrored to the main
   display by default. If the physical display is powered off (e.g. with a smart plug), the
   virtual display takes over so agents still have a screen.
+- **Launch at Login** from the menu (single instance; `--login-item status|on|off` from the command line).
 - Safe recovery: quitting or crashing restores the picture; locking the screen restores
   brightness so the login window is visible.
 
@@ -43,7 +44,7 @@ notarized, so the first launch is blocked by Gatekeeper: right-click the app →
 xattr -dr com.apple.quarantine "/Applications/XDR Agent Screen.app"
 ```
 
-To start it at login, add it in System Settings → General → Login Items.
+To start it at login, choose **Launch at Login** in its menu.
 
 ## Build from source
 
