@@ -2,7 +2,7 @@
 // with a brightness slider, configurable global hotkey, idle auto-blackout and an optional virtual
 // "Agent Display" (mirrored by default) that takes over when the physical display is powered off.
 import AppKit
-import Carbon.HIToolbox
+import Carbon
 import CoreGraphics
 import IOKit
 import ServiceManagement
@@ -11,9 +11,13 @@ let appName = "XDR Agent Screen"
 
 let logURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/xdr-agent-screen.log")
 
-func log(_ s: String) {
+let logDateFormatter: DateFormatter = {
     let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"
-    let line = "\(f.string(from: Date())) \(s)\n"
+    return f
+}()
+
+func log(_ s: String) {
+    let line = "\(logDateFormatter.string(from: Date())) \(s)\n"
     print(line, terminator: ""); fflush(stdout)
     if let h = try? FileHandle(forWritingTo: logURL) {
         h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close()
@@ -38,15 +42,17 @@ func migrateLegacySettings() {
 struct Hotkey {
     var keyCode: UInt32
     var modifiers: UInt32  // Carbon modifier mask
-    var display: String
 
-    static let fallback = Hotkey(keyCode: UInt32(kVK_ANSI_L),
-                                 modifiers: UInt32(cmdKey | optionKey | controlKey), display: "⌃⌥⌘L")
+    // Built from the key code rather than stored, so it ignores Shift (⇧⌘1, not ⇧⌘!) and follows
+    // the current keyboard layout.
+    var display: String { modifierSymbols(cocoaModifiers(modifiers)) + keyName(Int(keyCode)) }
+
+    static let fallback = Hotkey(keyCode: UInt32(kVK_ANSI_L), modifiers: UInt32(cmdKey | optionKey | controlKey))
 
     static func load() -> Hotkey {
-        guard let d = defaults.string(forKey: "hotkeyDisplay") else { return fallback }
+        guard defaults.object(forKey: "hotkeyCode") != nil else { return fallback }
         return Hotkey(keyCode: UInt32(defaults.integer(forKey: "hotkeyCode")),
-                      modifiers: UInt32(defaults.integer(forKey: "hotkeyMods")), display: d)
+                      modifiers: UInt32(defaults.integer(forKey: "hotkeyMods")))
     }
 
     func save() {
@@ -89,6 +95,8 @@ var mirrorEnabled: Bool {
 
 // Each display's ColorSync gamma, captured so dimming scales the calibrated curve instead of replacing it.
 var baseTables: [CGDirectDisplayID: ([CGGammaValue], [CGGammaValue], [CGGammaValue])] = [:]
+// The displays that were online when baseTables was captured.
+var capturedDisplays: Set<CGDirectDisplayID> = []
 
 func onlineDisplays() -> [CGDirectDisplayID] {
     var ids = [CGDirectDisplayID](repeating: 0, count: 16); var n: UInt32 = 0
@@ -99,7 +107,9 @@ func onlineDisplays() -> [CGDirectDisplayID] {
 func captureBaseTables() {
     CGDisplayRestoreColorSyncSettings()
     baseTables = [:]
-    for id in onlineDisplays() {
+    let ids = onlineDisplays()
+    capturedDisplays = Set(ids)
+    for id in ids {
         var r = [CGGammaValue](repeating: 0, count: 1024), g = r, b = r; var n: UInt32 = 0
         guard CGGetDisplayTransferByTable(id, 1024, &r, &g, &b, &n) == .success, n > 0 else { continue }
         baseTables[id] = (Array(r.prefix(Int(n))), Array(g.prefix(Int(n))), Array(b.prefix(Int(n))))
@@ -240,6 +250,15 @@ func carbonModifiers(_ flags: NSEvent.ModifierFlags) -> UInt32 {
     return m
 }
 
+func cocoaModifiers(_ m: UInt32) -> NSEvent.ModifierFlags {
+    var flags: NSEvent.ModifierFlags = []
+    if m & UInt32(controlKey) != 0 { flags.insert(.control) }
+    if m & UInt32(optionKey) != 0 { flags.insert(.option) }
+    if m & UInt32(shiftKey) != 0 { flags.insert(.shift) }
+    if m & UInt32(cmdKey) != 0 { flags.insert(.command) }
+    return flags
+}
+
 func modifierSymbols(_ flags: NSEvent.ModifierFlags) -> String {
     (flags.contains(.control) ? "⌃" : "") + (flags.contains(.option) ? "⌥" : "")
         + (flags.contains(.shift) ? "⇧" : "") + (flags.contains(.command) ? "⌘" : "")
@@ -253,6 +272,44 @@ let specialKeys: [Int: String] = [
     kVK_ForwardDelete: "⌦", kVK_LeftArrow: "←", kVK_RightArrow: "→", kVK_UpArrow: "↑",
     kVK_DownArrow: "↓", kVK_Home: "↖", kVK_End: "↘", kVK_PageUp: "⇞", kVK_PageDown: "⇟",
 ]
+// Numeric keypad keys, named apart from the main-row keys that type the same character.
+let keypadKeys: [Int: String] = [
+    kVK_ANSI_Keypad0: "0", kVK_ANSI_Keypad1: "1", kVK_ANSI_Keypad2: "2", kVK_ANSI_Keypad3: "3",
+    kVK_ANSI_Keypad4: "4", kVK_ANSI_Keypad5: "5", kVK_ANSI_Keypad6: "6", kVK_ANSI_Keypad7: "7",
+    kVK_ANSI_Keypad8: "8", kVK_ANSI_Keypad9: "9", kVK_ANSI_KeypadDecimal: ".", kVK_ANSI_KeypadMultiply: "*",
+    kVK_ANSI_KeypadPlus: "+", kVK_ANSI_KeypadMinus: "-", kVK_ANSI_KeypadDivide: "/",
+    kVK_ANSI_KeypadEquals: "=", kVK_ANSI_KeypadClear: "⌧", kVK_ANSI_KeypadEnter: "⌤",
+]
+
+// The unshifted character a key types in the current keyboard layout (falling back to an ASCII
+// layout when the current input source, e.g. an input method, has no layout data).
+func layoutCharacter(_ code: Int) -> String? {
+    let sources: [() -> Unmanaged<TISInputSource>?] = [TISCopyCurrentKeyboardLayoutInputSource,
+                                                       TISCopyCurrentASCIICapableKeyboardLayoutInputSource]
+    for copy in sources {
+        guard let src = copy()?.takeRetainedValue(),
+              let ptr = TISGetInputSourceProperty(src, kTISPropertyUnicodeKeyLayoutData) else { continue }
+        let data = Unmanaged<CFData>.fromOpaque(ptr).takeUnretainedValue() as Data
+        var dead: UInt32 = 0
+        var chars = [UniChar](repeating: 0, count: 4)
+        var n = 0
+        let status = data.withUnsafeBytes { buf -> OSStatus in
+            guard let layout = buf.bindMemory(to: UCKeyboardLayout.self).baseAddress else { return -1 }
+            return UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDisplay), 0, UInt32(LMGetKbdType()),
+                                  OptionBits(kUCKeyTranslateNoDeadKeysMask), &dead, 4, &n, &chars)
+        }
+        let s = String(utf16CodeUnits: chars, count: n).trimmingCharacters(in: .whitespacesAndNewlines.union(.controlCharacters))
+        if status == noErr, !s.isEmpty { return s }
+    }
+    return nil
+}
+
+func keyName(_ code: Int) -> String {
+    if let s = specialKeys[code] { return s }
+    if let s = keypadKeys[code] { return "Keypad " + s }
+    return layoutCharacter(code)?.uppercased() ?? "Key \(code)"
+}
+
 let functionKeys: Set<Int> = Set([kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8,
                                   kVK_F9, kVK_F10, kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15,
                                   kVK_F16, kVK_F17, kVK_F18, kVK_F19])
@@ -268,6 +325,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var sessionLocked = false
     var recorder: NSPanel?
     var recorderMonitor: Any?
+    var recorderObservers: [NSObjectProtocol] = []
+    var displayRefreshWork: DispatchWorkItem?
     weak var levelSlider: NSSlider?
     weak var toggleItem: NSMenuItem?
     weak var idleLabelItem: NSMenuItem?
@@ -302,15 +361,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if savedLevel < 0.5 || defaults.bool(forKey: "overridingBacklight") { setLevel(restoreLevel, reason: "startup") }
         else { syncFromHardware(); setLevel(level, reason: "startup") }
 
-        // Display hot-plug (e.g. XDR powered back on) resets gamma and mirroring; recapture and reapply.
+        // Display hot-plug (e.g. XDR powered back on) resets gamma and mirroring; reapply both.
         CGDisplayRegisterReconfigurationCallback({ _, flags, _ in
-            if !flags.contains(.beginConfigurationFlag) {
-                DispatchQueue.main.async {
-                    captureBaseTables()
-                    if app.level < 0.5 { applyLevel(app.level) }
-                    scheduleMirrorSync()
-                }
-            }
+            if !flags.contains(.beginConfigurationFlag) { DispatchQueue.main.async { app.displaysChanged() } }
         }, nil)
 
         // The hotkey doesn't reach us on the lock screen, so never leave it dark: bring the
@@ -326,7 +379,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             lastManualChange = Date()
         }
 
-        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [unowned self] _ in
+        // Common modes, so this keeps running while the menu is open or an alert is up.
+        let timer = Timer(timeInterval: 2, repeats: true) { [unowned self] _ in
             // ColorSync / Night Shift can rewrite gamma behind our back
             if gammaPart(level) < 0.999 { applyGamma(gammaPart(level)) }
             // A restore by signal or menu doesn't reset the HID idle clock, so also require a full idle
@@ -335,8 +389,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if !isBlack && !sessionLocked && idleMinutes > 0 && hidIdleSeconds() >= threshold
                 && Date().timeIntervalSince(lastManualChange) >= threshold {
                 setLevel(0, reason: "idle")
+                closeMenu()  // an open menu would swallow the hotkey on the now black screen
             }
         }
+        RunLoop.main.add(timer, forMode: .common)
         log("\(appName) started, hotkey=\(hotkey.display) idle=\(idleMinutes)min level=\(level) "
             + "agentDisplay=\(virtualResolution.map { "\($0.0)x\($0.1)" } ?? "off") mirror=\(mirrorEnabled)")
     }
@@ -348,6 +404,23 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         CGDisplayRestoreColorSyncSettings()
         log("exit")
+    }
+
+    // The reconfiguration callback fires once per display per change, in bursts. Reapply the dimming
+    // right away with the tables we have (no restore, so no flash), and only recapture the ColorSync
+    // tables, which briefly restores the normal picture, once the burst settles and only if the set of
+    // displays actually changed.
+    func displaysChanged() {
+        if level < 0.5 { applyLevel(level) }
+        scheduleMirrorSync()
+        displayRefreshWork?.cancel()
+        let w = DispatchWorkItem { [unowned self] in
+            guard Set(onlineDisplays()) != capturedDisplays else { return }
+            captureBaseTables()
+            if level < 0.5 { applyLevel(level) }
+        }
+        displayRefreshWork = w
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: w)
     }
 
     // MARK: Brightness
@@ -491,12 +564,18 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc func recordHotkey() {
+        if let recorder {  // already recording: bring that panel back instead of opening a second one
+            NSApp.activate(ignoringOtherApps: true)
+            recorder.makeKeyAndOrderFront(nil)
+            return
+        }
         if let ref = hotkeyRef { UnregisterEventHotKey(ref); hotkeyRef = nil }  // let the current combo be re-recorded
 
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 110),
                             styleMask: [.titled, .closable], backing: .buffered, defer: false)
         panel.title = "Set Shortcut"
         panel.isReleasedWhenClosed = false
+        panel.hidesOnDeactivate = false
         let label = NSTextField(wrappingLabelWithString: "Press the new shortcut\n(must include ⌘ ⌥ ⌃, or use F1–F19)\nEsc to cancel")
         label.alignment = .center
         label.frame = NSRect(x: 20, y: 20, width: 280, height: 70)
@@ -512,13 +591,14 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 label.stringValue = "Must include ⌘ ⌥ ⌃\n(or use F1–F19), try again\nEsc to cancel"
                 return nil
             }
-            let key = specialKeys[code] ?? (e.charactersIgnoringModifiers ?? "?").uppercased()
-            finishRecording(Hotkey(keyCode: UInt32(code), modifiers: carbonModifiers(flags),
-                                   display: modifierSymbols(flags) + key))
+            finishRecording(Hotkey(keyCode: UInt32(code), modifiers: carbonModifiers(flags)))
             return nil
         }
-        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: panel, queue: .main) {
-            [unowned self] _ in if recorderMonitor != nil { finishRecording(nil) }
+        // Closing the panel or switching away from it cancels, so the old hotkey never stays unregistered.
+        recorderObservers = [NSWindow.willCloseNotification, NSWindow.didResignKeyNotification].map { name in
+            NotificationCenter.default.addObserver(forName: name, object: panel, queue: .main) {
+                [unowned self] _ in if recorderMonitor != nil { finishRecording(nil) }
+            }
         }
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
@@ -526,6 +606,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func finishRecording(_ new: Hotkey?) {
         if let m = recorderMonitor { NSEvent.removeMonitor(m); recorderMonitor = nil }
+        recorderObservers.forEach { NotificationCenter.default.removeObserver($0) }
+        recorderObservers = []
         recorder?.close(); recorder = nil
         if let new, registerHotkey(new) {
             hotkey = new
@@ -561,12 +643,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // Menu key equivalent that displays the same combo as the global hotkey.
     func keyEquivalent(for hk: Hotkey) -> (String, NSEvent.ModifierFlags)? {
-        var mods: NSEvent.ModifierFlags = []
-        if hk.modifiers & UInt32(controlKey) != 0 { mods.insert(.control) }
-        if hk.modifiers & UInt32(optionKey) != 0 { mods.insert(.option) }
-        if hk.modifiers & UInt32(shiftKey) != 0 { mods.insert(.shift) }
-        if hk.modifiers & UInt32(cmdKey) != 0 { mods.insert(.command) }
+        let mods = cocoaModifiers(hk.modifiers)
         let code = Int(hk.keyCode)
+        // A menu key equivalent can't tell keypad keys from main-row ones; show none rather than a wrong one.
+        if keypadKeys[code] != nil { return nil }
         let special: [Int: Int] = [
             kVK_Space: 0x20, kVK_Return: 0x0D, kVK_Tab: 0x09, kVK_Delete: 0x08,
             kVK_ForwardDelete: NSDeleteFunctionKey, kVK_LeftArrow: NSLeftArrowFunctionKey,
@@ -578,9 +658,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
                      kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19]
         if let i = fKeys.firstIndex(of: code) { return (String(UnicodeScalar(NSF1FunctionKey + i)!), mods) }
         if let u = special[code] { return (String(UnicodeScalar(u)!), mods) }
-        // Printable key: the display string minus its modifier symbols.
-        let key = hk.display.filter { !"⌃⌥⇧⌘".contains($0) }.lowercased()
-        return key.isEmpty ? nil : (key, mods)
+        // Printable key: its unshifted character, so ⇧ shows as a modifier rather than a shifted symbol.
+        guard let key = layoutCharacter(code)?.lowercased(), key.count == 1 else { return nil }
+        return (key, mods)
     }
 
     // The hotkey shown on "Black Out Now" is informational; the global hotkey does the work.
@@ -672,6 +752,10 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func setVirtual(_ sender: NSMenuItem) {
         let size = sender.tag < 0 ? nil : virtualResolutions[sender.tag]
+        // Re-picking the current choice would tear the display down and rebuild it for nothing.
+        let unchanged = size.map { s in virtualDisplay != nil && virtualResolution.map { $0 == s } == true }
+            ?? (virtualDisplay == nil)
+        guard !unchanged else { return }
         virtualResolution = size
         setVirtualDisplay(size)
         scheduleMirrorSync()

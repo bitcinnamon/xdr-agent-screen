@@ -5,8 +5,10 @@ cd "$(dirname "$0")"
 ./build.sh
 APP="/Applications/XDR Agent Screen.app"
 
-# Quit a running copy first (it restores brightness on the way out).
-pkill -TERM -x XDRAgentScreen 2>/dev/null && sleep 1 || true
+# Quit a running copy first (it restores brightness on the way out), and wait for it to be gone:
+# the new copy exits right away if it finds another instance still running.
+pkill -TERM -x XDRAgentScreen 2>/dev/null || true
+for _ in {1..50}; do pgrep -x XDRAgentScreen >/dev/null || break; sleep 0.1; done
 
 # Clean up the LaunchAgent that earlier versions of this script installed.
 OLD="$HOME/Library/LaunchAgents/local.xdr-agent-screen.plist"

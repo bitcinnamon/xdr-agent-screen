@@ -14,7 +14,7 @@ for px in 16 32 128 256 512; do
   sips -z $((px * 2)) $((px * 2)) icon/icon-1024.png --out "$ICONSET/icon_${px}x${px}@2x.png" >/dev/null
 done
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
-swiftc -O -import-objc-header CGVirtualDisplay.h main.swift -o "$APP/Contents/MacOS/XDRAgentScreen"
+swiftc -O -target arm64-apple-macos14.0 -import-objc-header CGVirtualDisplay.h main.swift -o "$APP/Contents/MacOS/XDRAgentScreen"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
