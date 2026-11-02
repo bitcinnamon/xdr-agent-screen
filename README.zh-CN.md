@@ -46,11 +46,11 @@ xattr -dr com.apple.quarantine "/Applications/XDR Agent Screen.app"
 ## 从源码编译安装
 
 ```sh
-./install.sh     # 编译出 build/XDR Agent Screen.app，并安装 LaunchAgent（登录时自动启动）
-./uninstall.sh   # 停止程序（会恢复亮度）并移除 LaunchAgent
+./install.sh     # 编译并安装到 /Applications，启动它并打开 Launch at Login
+./uninstall.sh   # 关闭 Launch at Login，退出程序（会恢复亮度）并删除应用
 ```
 
-日志：`/tmp/xdr-agent-screen.log`。设置：`defaults read local.xdr-agent-screen`。
+日志：`~/Library/Logs/xdr-agent-screen.log`。设置：`defaults read local.xdr-agent-screen`。
 
 ## 远程控制
 
@@ -59,7 +59,11 @@ kill -USR2 $(pgrep -x XDRAgentScreen)   # 切换全暗 / 恢复，效果同快�
 kill -USR1 $(pgrep -x XDRAgentScreen)   # 弹出菜单 5 秒（方便截图）
 ```
 
-如果屏幕卡在全黑，执行 `./uninstall.sh`（或 `launchctl unload` 这个 LaunchAgent）一定能恢复。
+如果屏幕卡在全黑，退出程序一定能恢复：
+
+```sh
+pkill -x XDRAgentScreen
+```
 
 ## 说明
 

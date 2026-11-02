@@ -49,11 +49,11 @@ To start it at login, choose **Launch at Login** in its menu.
 ## Build from source
 
 ```sh
-./install.sh     # builds build/XDR Agent Screen.app and installs a LaunchAgent (starts at login)
-./uninstall.sh   # stops it (restoring brightness) and removes the LaunchAgent
+./install.sh     # builds the app, installs it to /Applications, starts it and turns on Launch at Login
+./uninstall.sh   # turns off Launch at Login, quits it (restoring brightness) and removes the app
 ```
 
-Log: `/tmp/xdr-agent-screen.log`. Settings: `defaults read local.xdr-agent-screen`.
+Log: `~/Library/Logs/xdr-agent-screen.log`. Settings: `defaults read local.xdr-agent-screen`.
 
 ## Remote control
 
@@ -62,8 +62,11 @@ kill -USR2 $(pgrep -x XDRAgentScreen)   # toggle black-out, same as the shortcut
 kill -USR1 $(pgrep -x XDRAgentScreen)   # pop the menu open for 5 s (for screenshots)
 ```
 
-If the screen is ever stuck dark, `./uninstall.sh` (or `launchctl unload` of the LaunchAgent)
-always brings it back.
+If the screen is ever stuck dark, quitting the app always brings it back:
+
+```sh
+pkill -x XDRAgentScreen
+```
 
 ## Notes
 

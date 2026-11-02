@@ -9,9 +9,17 @@ import ServiceManagement
 
 let appName = "XDR Agent Screen"
 
+let logURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/xdr-agent-screen.log")
+
 func log(_ s: String) {
-    let f = DateFormatter(); f.dateFormat = "HH:mm:ss"
-    print("\(f.string(from: Date())) \(s)"); fflush(stdout)
+    let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    let line = "\(f.string(from: Date())) \(s)\n"
+    print(line, terminator: ""); fflush(stdout)
+    if let h = try? FileHandle(forWritingTo: logURL) {
+        h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); try? h.close()
+    } else {
+        try? line.write(to: logURL, atomically: false, encoding: .utf8)
+    }
 }
 
 // MARK: - Settings
@@ -205,10 +213,6 @@ func scheduleMirrorSync() {
 }
 
 // MARK: - Launch at login
-
-// install.sh runs the app from a LaunchAgent (which also restarts it after a crash); a login item
-// on top of that would only start a second copy.
-let managedByLaunchAgent = ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] == "local.xdr-agent-screen"
 
 func loginItemStatus() -> String {
     switch SMAppService.mainApp.status {
@@ -655,14 +659,8 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // State in the title rather than a checkmark: a checked item makes the menu reserve a state
         // column, which shifts every title off the sliders' edge.
-        if managedByLaunchAgent {
-            let item = NSMenuItem(title: "Launch at Login: On (LaunchAgent)", action: nil, keyEquivalent: "")
-            item.isEnabled = false
-            menu.addItem(item)
-        } else {
-            let on = SMAppService.mainApp.status == .enabled
-            menu.addItem(menuItem("Launch at Login: " + (on ? "On" : "Off"), #selector(toggleLoginItem)))
-        }
+        let loginOn = SMAppService.mainApp.status == .enabled
+        menu.addItem(menuItem("Launch at Login: " + (loginOn ? "On" : "Off"), #selector(toggleLoginItem)))
         menu.addItem(NSMenuItem(title: "Quit \(appName)", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
@@ -714,7 +712,7 @@ if let i = CommandLine.arguments.firstIndex(of: "--login-item") {
 
 let nsApp = NSApplication.shared
 
-// Only one copy: a login item and a LaunchAgent (or a double-click) must not both run it.
+// Only one copy, however it was launched (login item, Finder, `open`).
 if NSRunningApplication.runningApplications(withBundleIdentifier: Bundle.main.bundleIdentifier ?? "")
     .contains(where: { $0.processIdentifier != getpid() }) {
     log("another instance is running; exiting")
