@@ -33,7 +33,19 @@ Built for a Mac mini driving a Pro Display XDR, but works with any display.
 - Xcode command line tools (`swiftc`)
 - Recommended: System Settings → Lock Screen → turn display off and start screen saver: **Never**
 
-## Install
+## Download
+
+Grab `XDR-Agent-Screen-*-arm64.zip` from [Releases](https://github.com/bitcinnamon/xdr-agent-screen/releases),
+unzip, and move `XDR Agent Screen.app` to `/Applications`. The app is ad-hoc signed but not
+notarized, so the first launch is blocked by Gatekeeper: right-click the app → **Open**, or run
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/XDR Agent Screen.app"
+```
+
+To start it at login, add it in System Settings → General → Login Items.
+
+## Build from source
 
 ```sh
 ./install.sh     # builds build/XDR Agent Screen.app and installs a LaunchAgent (starts at login)

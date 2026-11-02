@@ -30,7 +30,19 @@ XDR Agent Screen 让屏幕变黑，但**不让显示器睡眠**：通过 gamma �
 - Xcode 命令行工具（`swiftc`）
 - 建议：系统设置 → 锁定屏幕 → "不活跃时关闭显示器"和"不活跃时启动屏幕保护程序"都设为**永不**
 
-## 安装
+## 下载
+
+从 [Releases](https://github.com/bitcinnamon/xdr-agent-screen/releases) 下载 `XDR-Agent-Screen-*-arm64.zip`，
+解压后把 `XDR Agent Screen.app` 拖到 `/Applications`。应用只做了临时签名、没有经过 Apple 公证，
+第一次打开会被系统拦截：右键点应用 → **打开**，或者执行
+
+```sh
+xattr -dr com.apple.quarantine "/Applications/XDR Agent Screen.app"
+```
+
+想开机自动启动，在 系统设置 → 通用 → 登录项 里添加它。
+
+## 从源码编译安装
 
 ```sh
 ./install.sh     # 编译出 build/XDR Agent Screen.app，并安装 LaunchAgent（登录时自动启动）
