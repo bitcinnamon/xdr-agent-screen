@@ -1,5 +1,7 @@
 # XDR Agent Screen
 
+English | [中文](README.zh-CN.md)
+
 A macOS menu bar app that keeps your display dark while computer-use agents keep working.
 
 ## Why
