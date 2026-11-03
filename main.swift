@@ -155,7 +155,14 @@ func setHardwareBrightness(_ v: Double) {
 // Combined brightness: the upper half of the slider drives the backlight, the lower half keeps the
 // backlight at minimum and dims further in software down to black.
 func hardwarePart(_ level: Double) -> Double { max(0, min(1, (level - 0.5) * 2)) }
-func gammaPart(_ level: Double) -> Double { max(0, min(1, level * 2)) }
+
+// Fraction of the minimum-backlight luminance the lower half leaves on screen, linear in the slider.
+func softwareDimPart(_ level: Double) -> Double { max(0, min(1, level * 2)) }
+
+// Gamma output scale for that luminance. Luminance goes roughly with the encoded value to the power
+// 2.2, so scaling the encoded value linearly would make most of the lower half near-black, and the
+// XDR's local dimming switches zones fully off well before black.
+func gammaPart(_ level: Double) -> Double { pow(softwareDimPart(level), 1 / 2.2) }
 
 func applyLevel(_ level: Double) {
     setHardwareBrightness(hardwarePart(level))
@@ -496,7 +503,7 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func brightnessLabel() -> String {
         if isBlack { return "Brightness: Off (black)" }
-        if level < 0.5 { return "Brightness: Software Dim \(Int((gammaPart(level) * 100).rounded()))%" }
+        if level < 0.5 { return "Brightness: Software Dim \(Int((softwareDimPart(level) * 100).rounded()))%" }
         return "Brightness: Native Backlight \(Int((hardwarePart(level) * 100).rounded()))%"
     }
 
