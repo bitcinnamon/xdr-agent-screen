@@ -76,7 +76,12 @@ var savedLevel: Double {
     set { defaults.set(newValue, forKey: "level") }
 }
 
-let virtualResolutions: [(UInt32, UInt32)] = [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160)]
+let virtualResolutions: [(UInt32, UInt32)] = [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160),
+                                              (1260, 840), (2520, 1680)]
+
+// 3:2 modes for streaming to an 8.8" 2520×1680 tablet (OPPO Pad Mini) without letterboxing:
+// its native panel, and exactly half of it (pixel-doubled, about as large as 1280×720).
+let tabletResolutionNotes: [UInt32: String] = [1260: "3:2, tablet @2x", 2520: "3:2, tablet native"]
 
 var virtualResolution: (UInt32, UInt32)? {
     get {
@@ -734,7 +739,9 @@ final class App: NSObject, NSApplicationDelegate, NSMenuDelegate {
         virtMenu.addItem(.separator())
         for (i, (w, h)) in virtualResolutions.enumerated() {
             let on = current.map { $0 == (w, h) } ?? false
-            virtMenu.addItem(menuItem("\(w) × \(h)", #selector(setVirtual(_:)), tag: i, on: on))
+            let note = tabletResolutionNotes[w]
+            if note != nil, i > 0, tabletResolutionNotes[virtualResolutions[i - 1].0] == nil { virtMenu.addItem(.separator()) }
+            virtMenu.addItem(menuItem("\(w) × \(h)" + (note.map { " (\($0))" } ?? ""), #selector(setVirtual(_:)), tag: i, on: on))
         }
         virtMenu.addItem(.separator())
         virtMenu.addItem(menuItem("Mirror Main Display", #selector(toggleMirror), on: mirrorEnabled))
