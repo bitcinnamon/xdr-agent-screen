@@ -21,7 +21,7 @@ Built for a Mac mini driving a Pro Display XDR, but works with any display.
   brightness control), the left half keeps the backlight at minimum and dims further in software,
   down to black.
 - **Idle black-out**: black out after 1–60 minutes without input, or never.
-- **Agent Display**: an optional virtual display (1280×720 up to 3840×2160, plus 3:2 modes of 1260×840 and 2520×1680 for tablets), mirrored to the main
+- **Agent Display**: an optional virtual display (1280×720 up to 3840×2160, plus a 3:2 HiDPI mode of 1260×840 for tablets), mirrored to the main
   display by default. If the physical display is powered off (e.g. with a smart plug), the
   virtual display takes over so agents still have a screen.
 - **Launch at Login** from the menu (single instance; `--login-item status|on|off` from the command line).

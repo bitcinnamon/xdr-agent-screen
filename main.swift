@@ -76,12 +76,11 @@ var savedLevel: Double {
     set { defaults.set(newValue, forKey: "level") }
 }
 
-let virtualResolutions: [(UInt32, UInt32)] = [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160),
-                                              (1260, 840), (2520, 1680)]
+let virtualResolutions: [(UInt32, UInt32)] = [(1280, 720), (1920, 1080), (2560, 1440), (3840, 2160), (1260, 840)]
 
-// 3:2 modes for streaming to an 8.8" 2520×1680 tablet (OPPO Pad Mini) without letterboxing:
-// its native panel, and exactly half of it (pixel-doubled, about as large as 1280×720).
-let tabletResolutionNotes: [UInt32: String] = [1260: "3:2, tablet @2x", 2520: "3:2, tablet native"]
+// 3:2 HiDPI mode for streaming to an 8.8" 2520×1680 tablet (OPPO Pad Mini) without letterboxing:
+// about as large as 1280×720, but rendered at 2x so it maps pixel for pixel onto the tablet's panel.
+let tabletResolutionNotes: [UInt32: String] = [1260: "3:2 HiDPI"]
 
 var virtualResolution: (UInt32, UInt32)? {
     get {
@@ -202,7 +201,7 @@ func setVirtualDisplay(_ size: (UInt32, UInt32)?) {
     desc.terminationHandler = { _, _ in log("agent display terminated") }
     guard let d = CGVirtualDisplay(descriptor: desc) else { log("agent display create failed"); return }
     let settings = CGVirtualDisplaySettings()
-    settings.hiDPI = 0
+    settings.hiDPI = tabletResolutionNotes[w] != nil ? 1 : 0
     settings.modes = [CGVirtualDisplayMode(width: w, height: h, refreshRate: 60)]
     guard d.apply(settings) else { log("agent display applySettings failed"); return }
     virtualDisplay = d
