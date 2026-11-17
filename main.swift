@@ -223,12 +223,33 @@ func syncMirror() {
     log(target == kCGNullDirectDisplay ? "mirror off (\(err.rawValue))" : "mirror agent→\(target) (\(err.rawValue))")
 }
 
+// A HiDPI virtual display also offers 1x modes (e.g. 2520×1680 at 1x next to 1260×840 at 2x), and
+// macOS may pick one of those when the display becomes main. Select the 2x mode explicitly.
+// Skipped while mirroring: a mirror follows its master's mode.
+func selectHiDPIMode() {
+    guard let d = virtualDisplay, let (w, h) = virtualResolution, tabletResolutionNotes[w] != nil else { return }
+    let id = d.displayID
+    guard CGDisplayMirrorsDisplay(id) == kCGNullDirectDisplay else { return }
+    let isTarget = { (m: CGDisplayMode) in m.width == Int(w) && m.height == Int(h) && m.pixelWidth == Int(w) * 2 }
+    if let cur = CGDisplayCopyDisplayMode(id), isTarget(cur) { return }
+    // HiDPI modes count as "duplicate low resolution" modes and are hidden unless asked for.
+    let opts = [kCGDisplayShowDuplicateLowResolutionModes: true] as CFDictionary
+    let modes = (CGDisplayCopyAllDisplayModes(id, opts) as? [CGDisplayMode]) ?? []
+    guard let mode = modes.first(where: isTarget) else { log("agent display: no \(w)x\(h) HiDPI mode"); return }
+    let before = CGDisplayCopyDisplayMode(id).map { "\($0.width)x\($0.height)@\($0.pixelWidth)px" } ?? "?"
+    var cfg: CGDisplayConfigRef?
+    guard CGBeginDisplayConfiguration(&cfg) == .success else { return }
+    CGConfigureDisplayWithDisplayMode(cfg, id, mode, nil)
+    let err = CGCompleteDisplayConfiguration(cfg, .forSession)
+    log("agent display mode \(before) → \(w)x\(h)@\(w * 2)px (\(err.rawValue))")
+}
+
 var mirrorWork: DispatchWorkItem?
 
 // Display changes arrive in bursts; settle before touching the mirror configuration.
 func scheduleMirrorSync() {
     mirrorWork?.cancel()
-    let w = DispatchWorkItem { syncMirror() }
+    let w = DispatchWorkItem { syncMirror(); selectHiDPIMode() }
     mirrorWork = w
     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: w)
 }
